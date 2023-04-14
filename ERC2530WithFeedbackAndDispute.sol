@@ -2,54 +2,50 @@ pragma solidity ^0.8.0;
 
 import "./IERC2530.sol";
 
-contract ERC2530WithFeedbackAndDispute is IERC2530, ERC2530 {
-    struct Feedback {
-        address author;
+contract ERC2530WithDispute is IERC2530, ERC2530 {
+    struct Dispute {
         uint256 listingId;
-        uint8 rating;
-        string comment;
-        bool isDisputed;
+        address buyer;
+        string reason;
+        bool isResolved;
+        string resolution;
     }
 
-    mapping(uint256 => Feedback[]) private _feedbacks;
+    mapping(uint256 => Dispute) private _disputes;
 
-    event FeedbackSubmitted(address indexed author, uint256 indexed listingId, uint8 rating, string comment);
-    event DisputeOpened(uint256 indexed listingId, uint256 indexed feedbackIndex);
-    event DisputeResolved(uint256 indexed listingId, uint256 indexed feedbackIndex, string resolution);
+    event DisputeOpened(uint256 indexed listingId, address indexed buyer, string reason);
+    event DisputeResolved(uint256 indexed listingId, string resolution);
 
     constructor(IERC20 token) ERC2530(token) {}
 
-    function submitFeedback(uint256 listingId, uint8 rating, string calldata comment) external {
-        require(rating >= 1 && rating <= 5, "ERC2530WithFeedback: rating must be between 1 and 5");
+    function openDispute(uint256 listingId, string calldata reason) external {
+        (, , , bool isPurchased) = getListing(listingId);
+        require(isPurchased, "ERC2530WithDispute: listing not purchased");
 
-        Feedback memory newFeedback = Feedback(msg.sender, listingId, rating, comment, false);
-        _feedbacks[listingId].push(newFeedback);
+        Dispute storage dispute = _disputes[listingId];
+        require(dispute.buyer == address(0), "ERC2530WithDispute: dispute already opened");
 
-        emit FeedbackSubmitted(msg.sender, listingId, rating, comment);
+        dispute.listingId = listingId;
+        dispute.buyer = msg.sender;
+        dispute.reason = reason;
+        dispute.isResolved = false;
+
+        emit DisputeOpened(listingId, msg.sender, reason);
     }
 
-    function openDispute(uint256 listingId, uint256 feedbackIndex) external {
-        Feedback storage feedback = _feedbacks[listingId][feedbackIndex];
-        require(!feedback.isDisputed, "ERC2530WithFeedback: dispute already opened");
-        feedback.isDisputed = true;
+    function resolveDispute(uint256 listingId, string calldata resolution) external onlyOwner {
+        Dispute storage dispute = _disputes[listingId];
+        require(dispute.buyer != address(0), "ERC2530WithDispute: dispute not opened");
+        require(!dispute.isResolved, "ERC2530WithDispute: dispute already resolved");
 
-        emit DisputeOpened(listingId, feedbackIndex);
+        dispute.isResolved = true;
+        dispute.resolution = resolution;
+
+        emit DisputeResolved(listingId, resolution);
     }
 
-    function resolveDispute(uint256 listingId, uint256 feedbackIndex, string calldata resolution) external onlyOwner {
-        Feedback storage feedback = _feedbacks[listingId][feedbackIndex];
-        require(feedback.isDisputed, "ERC2530WithFeedback: dispute not opened");
-        feedback.isDisputed = false;
-
-        emit DisputeResolved(listingId, feedbackIndex, resolution);
-    }
-
-    function getFeedback(uint256 listingId, uint256 index) external view returns (address, uint8, string memory, bool) {
-        Feedback storage feedback = _feedbacks[listingId][index];
-        return (feedback.author, feedback.rating, feedback.comment, feedback.isDisputed);
-    }
-
-    function getFeedbackCount(uint256 listingId) external view returns (uint256) {
-        return _feedbacks[listingId].length;
+    function getDispute(uint256 listingId) external view returns (address, string memory, bool, string memory) {
+        Dispute storage dispute = _disputes[listingId];
+        return (dispute.buyer, dispute.reason, dispute.isResolved, dispute.resolution);
     }
 }
